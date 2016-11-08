@@ -9,7 +9,14 @@
 #import "QRScannerView.h"
 #import <AVFoundation/AVFoundation.h>
 
-@interface QRScannerView ()
+@interface QRScannerView ()<AVCaptureMetadataOutputObjectsDelegate>
+{
+    //用来作为上下左右的“背景”
+    UIView *_topView;
+    UIView *_downView;
+    UIView *_leftView;
+    UIView *_rightView;
+}
 
 //采集设备
 @property (nonatomic, strong) AVCaptureDevice *device;
@@ -31,9 +38,13 @@
 //中间扫描区域的边长
 @property (nonatomic, assign) CGFloat slideLength;
 
+//摄像头采集到的画面展示
+@property (nonatomic, strong) AVCaptureVideoPreviewLayer *previewLayer;
 //自定义线程 来处理耗时操作——开始采集
 @property (nonatomic, strong) dispatch_queue_t sessionQueue;
 
+@property (nonatomic, strong) UIImageView *backgroundImageView;
+@property (nonatomic, strong) UIImageView *scrollImageView;
 @property (nonatomic, copy) QRScannerFinishHandler handler;
 
 @end
@@ -97,7 +108,29 @@
 
 - (void)setUpViews {
     //初始化四周的View
+    UIColor *bgColor = [[UIColor blackColor] colorWithAlphaComponent:0.5f];
+    _topView = [UIView new];
+    _downView = [UIView new];
+    _leftView = [UIView new];
+    _rightView = [UIView new];
     
+    _topView.backgroundColor = bgColor;
+    _downView.backgroundColor = bgColor;
+    _leftView.backgroundColor = bgColor;
+    _rightView.backgroundColor = bgColor;
+    
+    [self addSubview:_topView];
+    [self addSubview:_downView];
+    [self addSubview:_leftView];
+    [self addSubview:_rightView];
+    
+    //添加滚动线和扫描区域的背景Image View
+    [self addSubview:self.scrollImageView];
+    [self addSubview:self.backgroundImageView];
+    
+    //默认图片
+    self.backgroundImage = [UIImage imageNamed:@"scanBackground"];
+    self.scrollImage = [UIImage imageNamed:@"scanLine"];
 }
 
 #pragma mark - lazyloading
@@ -131,11 +164,63 @@
     return _deviceInput;
 }
 
+-(AVCaptureMetadataOutput *)metadataOutput {
+    if (!_metadataOutput) {
+        _metadataOutput = [[AVCaptureMetadataOutput alloc] init];
+        //设置代理，通过代理方法可以获取到扫描的数据
+        [_metadataOutput setMetadataObjectsDelegate:self queue:dispatch_get_main_queue()];
+    }
+    return _metadataOutput;
+}
+
+-(UIImageView *)backgroundImageView {
+    if (!_backgroundImageView) {
+        _backgroundImageView = [UIImageView new];
+        _backgroundImageView.contentMode = UIViewContentModeCenter;
+    }
+    return _backgroundImageView;
+}
+
+-(UIImageView *)scrollImageView {
+    if (!_scrollImageView) {
+        _scrollImageView = [UIImageView new];
+        _scrollImageView.contentMode = UIViewContentModeCenter;
+    }
+    return _scrollImageView;
+}
+
+
+-(AVCaptureVideoPreviewLayer *)previewLayer {
+    if (!_previewLayer) {
+        _previewLayer = [AVCaptureVideoPreviewLayer layerWithSession:self.session];
+        // 缩放方式
+        _previewLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
+        // 添加到self.layer
+        [self.layer insertSublayer:_previewLayer atIndex:0];
+    }
+    return _previewLayer;
+}
+
 
 #pragma mark - action
 - (void)fitOrientation {
     
 }
+
+#pragma mark - AVCaptureMetadataOutputObjectsDelegate
+
+
+#pragma mark - 
+-(void)layoutSubviews {
+    [super layoutSubviews];
+    
+    if (self.backgroundImage) {
+        _slideLength = self.backgroundImage.size.width;
+    }
+    
+//    self.
+}
+
 
 #pragma mark - public
 //block方法
