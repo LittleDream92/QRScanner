@@ -9,6 +9,7 @@
 #import "QRCodeViewController.h"
 #import "QRScanerHelper.h"
 #import "ZJProgressHUD.h"
+#import "QRScannerView.h"
 
 @interface QRCodeViewController ()
 
@@ -37,6 +38,16 @@
 - (void)startScanner {
     [ZJProgressHUD showStatus:@"需要真机测试" andAutoHideAfterTime:1.0];
     
+    QRScannerView *scanner = [QRScannerView new];
+    scanner.frame = self.view.bounds;
+    [self.view addSubview:scanner];
+    // 开始扫描
+    [scanner startScanning];
+    // 扫描完成
+    [scanner setScannerFinishHandler:^(QRScannerView *scanner, NSString *resultString) {
+        // 扫描结束
+        NSLog(@"内容是:%@", resultString);
+    }];
 }
 
 //生成二维码图片

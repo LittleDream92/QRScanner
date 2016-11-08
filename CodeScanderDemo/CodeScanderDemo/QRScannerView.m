@@ -53,6 +53,12 @@
 
 @implementation QRScannerView
 
+-(void)dealloc {
+    //移除
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:UIApplicationDidChangeStatusBarOrientationNotification object:nil];
+}
+
+
 -(instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
@@ -60,6 +66,7 @@
     }
     return self;
 }
+
 
 -(instancetype)initWithCoder:(NSCoder *)aDecoder {
     self = [super initWithCoder:aDecoder];
@@ -76,6 +83,7 @@
     _slideLength = 200;
     _scrollImageAnimateDuration = 2.f;
     
+    //监听状态栏
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(fitOrientation) name:UIApplicationDidChangeStatusBarOrientationNotification object:nil];
     
     //使用SERIAL 保证FIFO
@@ -173,6 +181,17 @@
     return _metadataOutput;
 }
 
+-(AVCaptureVideoPreviewLayer *)previewLayer {
+    if (!_previewLayer) {
+        _previewLayer = [AVCaptureVideoPreviewLayer layerWithSession:self.session];
+        // 缩放方式
+        _previewLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
+        // 添加到self.layer
+        [self.layer insertSublayer:_previewLayer atIndex:0];
+    }
+    return _previewLayer;
+}
+
 -(UIImageView *)backgroundImageView {
     if (!_backgroundImageView) {
         _backgroundImageView = [UIImageView new];
@@ -190,25 +209,82 @@
 }
 
 
--(AVCaptureVideoPreviewLayer *)previewLayer {
-    if (!_previewLayer) {
-        _previewLayer = [AVCaptureVideoPreviewLayer layerWithSession:self.session];
-        // 缩放方式
-        _previewLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
-        // 添加到self.layer
-        [self.layer insertSublayer:_previewLayer atIndex:0];
-    }
-    return _previewLayer;
+-(void)setBackgroundImage:(UIImage *)backgroundImage {
+    _backgroundImage = backgroundImage;
+    _backgroundImageView.image = backgroundImage;
+    [self setNeedsLayout];
+}
+
+-(void)setScrollImage:(UIImage *)scrollImage {
+    _scrollImage = scrollImage;
+    _scrollImageView.image = scrollImage;
+    [self setNeedsLayout];
 }
 
 
 #pragma mark - action
 - (void)fitOrientation {
+    switch ([[UIApplication sharedApplication] statusBarOrientation]) {
+        case UIInterfaceOrientationPortrait: {
+            self.previewLayer.connection.videoOrientation = AVCaptureVideoOrientationPortrait;
+        }
+            break;
+        case UIInterfaceOrientationPortraitUpsideDown: {
+            self.previewLayer.connection.videoOrientation = AVCaptureVideoOrientationPortraitUpsideDown;
+        }
+            break;
+        case UIInterfaceOrientationLandscapeLeft: {
+            self.previewLayer.connection.videoOrientation = AVCaptureVideoOrientationLandscapeLeft;
+        }
+            break;
+        case UIInterfaceOrientationLandscapeRight: {
+            self.previewLayer.connection.videoOrientation = AVCaptureVideoOrientationLandscapeRight;
+        }
+            break;
+        default:
+            break;
+    }
+}
+
+- (void)addAnimation {
+    static NSString *const kpositionYKey = @"positionY";
     
+    if ([self.scrollImageView.layer animationForKey:kpositionYKey]) {
+        //移除之前，可以适配旋转
+        [self.scrollImageView.layer removeAnimationForKey:kpositionYKey];
+    }
+    
+    //改变Y值
+    CABasicAnimation *scrollAnimation = [CABasicAnimation animationWithKeyPath:@"position.y"];
+    
+    scrollAnimation.toValue = [NSNumber numberWithFloat:CGRectGetMaxY(self.scrollImageView.frame)-self.scrollImageView.bounds.size.height];
+    
+    //时间函数
+    [scrollAnimation setTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionLinear]];
+    //自动反向
+    scrollAnimation.autoreverses = YES;
+    //无限
+    scrollAnimation.repeatCount = MAXFLOAT;
+    scrollAnimation.duration = _scrollImageAnimateDuration;
+    [self.scrollImageView.layer addAnimation:scrollAnimation forKey:kpositionYKey];
 }
 
 #pragma mark - AVCaptureMetadataOutputObjectsDelegate
-
+- (void)captureOutput:(AVCaptureOutput *)captureOutput didOutputMetadataObjects:(NSArray *)metadataObjects fromConnection:(AVCaptureConnection *)connection {
+    //停止扫描，不然会继续扫描
+    [self stopScanning];
+    
+    AVMetadataMachineReadableCodeObject *metadataObject = [metadataObjects objectAtIndex:0];
+    //block方法
+    if (_handler) {
+        self.handler(self, metadataObject.stringValue);
+    }
+    
+    //代理方法
+    if (_delegate && [_delegate respondsToSelector:@selector(qrScanner:didFinishScannerWithResult:)]) {
+        [_delegate qrScanner:self didFinishScannerWithResult:metadataObject.stringValue];
+    }
+}
 
 #pragma mark - 
 -(void)layoutSubviews {
@@ -218,7 +294,46 @@
         _slideLength = self.backgroundImage.size.width;
     }
     
-//    self.
+    self.previewLayer.frame = self.bounds;
+    
+    CGFloat selfWidth = self.bounds.size.width;
+    CGFloat selfHeight = self.bounds.size.height;
+    CGFloat bgImageViewX = (selfWidth-_slideLength)/2;
+    CGFloat bgImageViewY = (selfHeight-_slideLength)/2;
+    
+    //设置frame
+    self.backgroundImageView.frame = CGRectMake(bgImageViewX, bgImageViewY, _slideLength, _slideLength);
+    _topView.frame = CGRectMake(0.f, 0.f, selfWidth, bgImageViewY);
+    _leftView.frame = CGRectMake(0.f, bgImageViewY, bgImageViewX, _slideLength);
+    _rightView.frame = CGRectMake(CGRectGetMaxX(self.backgroundImageView.frame), bgImageViewY, bgImageViewX, _slideLength);
+    _downView.frame = CGRectMake(0.f, CGRectGetMaxY(self.backgroundImageView.frame), selfWidth, bgImageViewY);
+    
+    CGFloat scrollImageHeight = 1.0f;
+    if (self.scrollImage) {
+        scrollImageHeight = self.scrollImage.size.height;
+    }
+    
+    self.scrollImageView.frame = CGRectMake(bgImageViewX, bgImageViewY, _slideLength, scrollImageHeight);
+    /**
+     *  设置扫描的有效区域
+     *  这里需要注意 , rectOfInterest的 x, y, width, height的范围都是 0---1
+     *  默认为(0,0,1,1) 代表 x和y都为0, 宽高都为previewLayer的宽高
+     *  如果设置为 (0.5,0.5,0.5,0.5) 则表示居中显示, 宽高均为previewLayer的一半
+     *  所以设置的时候, 需要和相应的 宽高求比例
+     *  另外注意的是, 可以理解为系统处理图片的时候都是横着的, 当iPhone的屏幕确是竖着的
+     *  时候应该 x = y/height;  y = x/height ...
+     */
+    if (self.bounds.size.width < self.bounds.size.height) { // 竖屏的时候
+        self.metadataOutput.rectOfInterest = CGRectMake(bgImageViewY/selfHeight, bgImageViewX/selfWidth, _slideLength/selfHeight, _slideLength/selfWidth);
+    }else {
+        self.metadataOutput.rectOfInterest = CGRectMake(bgImageViewX/selfWidth, bgImageViewY/selfHeight, _slideLength/selfWidth, _slideLength/selfHeight);
+    }
+    if (self.bounds.size.width != 0) {// 有frame的时候添加动画和适应屏幕方向
+        
+        [self addAnimation];
+// 处理旋转 --- 也可以通过添加通知监听状态栏的方向来处理
+//        [self fitOrientation];
+    }
 }
 
 
